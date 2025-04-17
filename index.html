@@ -1,0 +1,778 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>スケジュール表示</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        /* カスタムスタイル */
+        html, body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f0f2f5;
+            padding: 2rem;
+            display: flex;
+            flex-direction: column;
+            min-height: 100%;
+            box-sizing: border-box;
+            font-size: 18px;
+        }
+
+        #schedule-board {
+            flex-grow: 1;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 2rem;
+            min-height: 0;
+        }
+
+        .schedule-column {
+            background-color: white;
+            border-radius: 1rem;
+            padding: 2rem;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            min-height: 450px;
+            max-height: calc(100vh - 4rem - 2rem);
+        }
+        .items-scroll-container {
+            flex-grow: 1;
+            position: relative;
+            overflow: hidden;
+            min-height: 0;
+            margin-top: 1.5rem;
+        }
+        .schedule-column.editing .items-scroll-container {
+            overflow-y: auto;
+            overflow-x: hidden;
+        }
+        .scrollable-list {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            transition: top 0.5s ease-in-out;
+        }
+        .schedule-column.editing .scrollable-list {
+            position: static;
+            transition: none;
+        }
+
+        /* 他のスタイル */
+        .time-section { margin-bottom: 1.5rem; position: relative; }
+        .time-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; }
+        .time-text { text-align: center; color: #4b5563; padding: 0.2rem 0.4rem; border-radius: 0.25rem; flex-grow: 1; margin: 0 0.5rem; }
+        .schedule-items-list { /* スタイル */ }
+        .schedule-item { padding: 0.6rem 0; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; }
+        .schedule-item span[data-type="item"] { color: #1f2937; }
+        .schedule-item:last-child { border-bottom: none; }
+        .edit-button { position: absolute; bottom: 1.5rem; right: 1.5rem; width: 3.5rem; height: 3.5rem; background-color: #d1d5db; border-radius: 50%; cursor: pointer; display: flex; justify-content: center; align-items: center; transition: background-color 0.3s; z-index: 10; color: white; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .edit-button svg { display: block; width: 1.75rem; height: 1.75rem; }
+        .edit-button.editing svg.edit-icon { display: none; }
+        .edit-button:not(.editing) svg.save-icon { display: none; }
+        .edit-button:hover { background-color: #9ca3af; }
+        .edit-button.editing { background-color: #60a5fa; }
+        .edit-button.editing:hover { background-color: #3b82f6; }
+        .edit-controls { display: none; margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid #eee; }
+        .schedule-column.editing .edit-controls { display: block; }
+        .schedule-column.editing [contenteditable="true"],
+        .schedule-column.editing h2[contenteditable="true"] {
+             outline: 2px dashed #a5b4fc; padding: 0.3rem 0.5rem; background-color: #eff6ff; border-radius: 0.25rem; min-width: 50px; display: inline-block;
+        }
+        .schedule-column.editing .warning-message[contenteditable="true"] { outline-offset: 2px; }
+        .delete-button, .add-button, .delete-section-button { cursor: pointer; margin-left: 0.5rem; padding: 0.4rem 0.8rem; border-radius: 0.375rem; border: 1px solid transparent; transition: background-color 0.2s; }
+        .delete-button, .delete-section-button { background-color: #fee2e2; color: #ef4444; border-color: #fecaca; }
+        .delete-button:hover, .delete-section-button:hover { background-color: #fecaca; }
+        .add-button { background-color: #dbeafe; color: #3b82f6; border-color: #bfdbfe; margin-top: 0.5rem; display: inline-block; }
+        .add-button:hover { background-color: #bfdbfe; }
+        .add-section-button { background-color: #dcfce7; color: #22c55e; border-color: #bbf7d0; margin-top: 1.5rem; width: 100%; padding: 0.75rem; font-size: 1.125rem; border-radius: 0.5rem; }
+        .add-section-button:hover { background-color: #bbf7d0; }
+        .warning-message {
+            border: 3px solid #ef4444; color: #ef4444; background-color: white; padding: 1.25rem; border-radius: 0.75rem; text-align: center; margin-top: 1.5rem; font-weight: bold;
+        }
+        .warning-toggle { margin-top: 1rem; display: flex; align-items: center; margin-bottom: 1.5rem; cursor: pointer; }
+        .warning-toggle input { margin-right: 0.5rem; width: 1.1rem; height: 1.1rem;}
+        .hidden { display: none; }
+
+        /* ★ 変更点: ポップアップ関連スタイルを dialog 要素用に調整 */
+        /* ★ 削除: #json-popup-overlay のスタイル */
+        /* #json-popup-overlay { ... } */
+
+        /* dialog 要素の基本スタイル */
+        #json-popup {
+            background-color: white; padding: 2rem; border-radius: 0.5rem;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+            width: 90%; max-width: 600px;
+            border: none; /* デフォルトの枠線を消す */
+            /* position, inset, display, align-items, justify-content, z-index は不要 */
+        }
+        /* dialog が open 属性を持たないときは非表示 (ブラウザデフォルトだが明示) */
+        #json-popup:not([open]) {
+            display: none;
+        }
+         /* dialog の backdrop スタイル */
+        #json-popup::backdrop {
+            background-color: rgba(0, 0, 0, 0.5);
+        }
+
+        #json-paste-area {
+            width: 100%; min-height: 150px; border: 1px solid #d1d5db;
+            border-radius: 0.375rem; padding: 0.5rem; font-family: monospace;
+            font-size: 0.9rem; margin-bottom: 1rem; box-sizing: border-box;
+        }
+        #popup-error-message { color: #ef4444; font-weight: bold; margin-top: 0.5rem; font-size: 0.9rem; }
+        #popup-buttons { display: flex; justify-content: space-between; margin-top: 1.5rem; }
+         #process-json-button, #close-popup-button {
+            padding: 0.6rem 1.2rem; border-radius: 0.375rem; font-weight: 600;
+            transition: background-color 0.2s; cursor: pointer;
+         }
+         #process-json-button { background-color: #3b82f6; color: white; border: none; }
+         #process-json-button:hover { background-color: #2563eb; }
+         #close-popup-button { background-color: #e5e7eb; color: #374151; border: 1px solid #d1d5db; }
+         #close-popup-button:hover { background-color: #d1d5db; }
+
+        /* 右下のデータ読み込みボタン */
+        #load-data-popup-button {
+            position: fixed; bottom: 1.5rem; right: 6rem; width: 3rem; height: 3rem;
+            background-color: #10b981; color: white; border-radius: 50%; border: none;
+            display: flex; align-items: center; justify-content: center;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1); cursor: pointer; z-index: 10;
+            transition: background-color 0.2s;
+        }
+        #load-data-popup-button:hover { background-color: #059669; }
+        #load-data-popup-button svg { width: 1.5rem; height: 1.5rem; }
+
+    </style>
+</head>
+<body>
+    <div id="schedule-board">
+        </div>
+
+    <dialog id="json-popup">
+        <h3 class="text-lg font-medium leading-6 text-gray-900 mb-4">JSONデータ貼り付け</h3>
+            <textarea id="json-paste-area" placeholder="ここにJSONデータを貼り付けてください..."></textarea>
+            <div id="popup-error-message" class="hidden"></div>
+            <div id="popup-buttons">
+                <button id="close-popup-button">閉じる</button>
+                <button id="process-json-button">読み込み</button>
+            </div>
+        </dialog>
+
+    <button id="load-data-popup-button" title="データを読み込む">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
+        </svg>
+    </button>
+
+
+    <script>
+        const scheduleBoard = document.getElementById('schedule-board');
+        // ★ 変更点: ポップアップ要素を dialog として取得
+        const loadDataPopupButton = document.getElementById('load-data-popup-button');
+        const jsonPopupDialog = document.getElementById('json-popup'); // ID は dialog 要素を指す
+        const jsonPasteArea = document.getElementById('json-paste-area');
+        const processJsonButton = document.getElementById('process-json-button');
+        const closePopupButton = document.getElementById('close-popup-button');
+        const popupErrorMessage = document.getElementById('popup-error-message');
+
+        // 初期デモデータ
+        const initialDemoData = [
+            { title: "バレーボール", showWarning: false, warningText: "5分遅れ", sections: [ { time: "12:30", items: ["2-5(男) 3-2(男) - 1コート", "2-5(男) 3-2(男) - 2コート", "2-5(女) 3-2(女) - 3コート"] }, { time: "13:30", items: ["1-4(男) 3-1(男) - 1コート", "1-4(男) 3-1(男) - 2コート"] }, { time: "14:30", items: ["追加項目1", "追加項目2", "追加項目3", "追加項目4", "追加項目5", "追加項目6"] } ] },
+            { title: "フットサル", showWarning: false, warningText: "開始遅延", sections: [ { time: "12:30", items: ["2-5(男) 3-2(男) - 1コート", "2-5(男) 3-2(男) - 2コート", "2-5(女) 3-2(女) - 3コート", "追加項目A", "追加項目B", "追加項目C", "追加項目D"] } ] },
+            { title: "dozzi", showWarning: true, warningText: "5分遅れ", sections: [ { time: "12:30", items: ["2-5(男) 3-2(男) - 1コート", "2-5(男) 3-2(男) - 2コート", "2-5(女) 3-2(女) - 3コート"] } ] }
+        ];
+
+        // 初期デモデータを columnData に設定
+        let columnData = JSON.parse(JSON.stringify(initialDemoData)).map(col => ({
+            title: col.title || "無題",
+            showWarning: col.showWarning || false,
+            warningText: col.warningText || "",
+            sections: (col.sections || []).map(sec => ({
+                time: sec.time || "??:??",
+                items: sec.items || [],
+            }))
+        }));
+
+        // 各列のスクロールタイマーIDを管理
+        let scrollIntervals = {};
+
+        // --- ポップアップ関連のイベントリスナー設定 ---
+        if (loadDataPopupButton && jsonPopupDialog) {
+            loadDataPopupButton.addEventListener('click', () => {
+                jsonPasteArea.value = ''; // テキストエリアをクリア
+                popupErrorMessage.classList.add('hidden'); // エラーメッセージを隠す
+                jsonPopupDialog.showModal(); // ★ 変更点: showModal() で表示
+            });
+        }
+
+        if (closePopupButton && jsonPopupDialog) {
+            closePopupButton.addEventListener('click', () => {
+                jsonPopupDialog.close(); // ★ 変更点: close() で非表示
+            });
+        }
+
+        // ★ 変更点: dialog 要素自身にクリックイベントを追加して背景クリックを検知
+        if (jsonPopupDialog) {
+            jsonPopupDialog.addEventListener('click', (event) => {
+                 // ダイアログの直接の子要素ではない、ダイアログ自身がクリックされた場合
+                 //（つまり、ダイアログ内のコンテンツではなく、背景部分をクリックした場合）
+                 // ただし、この方法は dialog の padding 領域などをクリックした場合も閉じてしまう
+                 // より確実なのは close ボタンを使うことだが、便宜上残す
+                 if (event.target === jsonPopupDialog) {
+                     jsonPopupDialog.close();
+                 }
+            });
+             // ESCキーで閉じる機能は dialog 要素に組み込まれている
+        }
+
+
+        if (processJsonButton && jsonPopupDialog) {
+            processJsonButton.addEventListener('click', () => {
+                const jsonString = jsonPasteArea.value;
+                popupErrorMessage.classList.add('hidden'); // エラーメッセージを一旦隠す
+
+                if (!jsonString.trim()) {
+                    popupErrorMessage.textContent = 'JSONデータが入力されていません。';
+                    popupErrorMessage.classList.remove('hidden');
+                    return;
+                }
+
+                try {
+                    const data = JSON.parse(jsonString);
+
+                    // 読み込んだデータを columnData に設定 (構造とデフォルト値を確認)
+                    columnData = data.map(col => ({
+                        title: col.title || "無題",
+                        showWarning: col.showWarning || false,
+                        warningText: col.warningText || "",
+                        sections: (col.sections || []).map(sec => ({
+                            time: sec.time || "??:??",
+                            items: sec.items || [],
+                        }))
+                    }));
+
+                    renderAllColumns(); // データを元に表示を開始
+                    jsonPopupDialog.close(); // ★ 変更点: close() で非表示
+
+                } catch (error) {
+                    console.error('JSONの解析に失敗しました:', error);
+                    popupErrorMessage.textContent = `JSON形式が無効です。貼り付けた内容を確認してください。 (${error.message})`;
+                    popupErrorMessage.classList.remove('hidden'); // エラーメッセージを表示 (ポップアップ内)
+                }
+            });
+        }
+
+
+        // --- 全体レンダリング関数 ---
+        function renderAllColumns() {
+            scheduleBoard.innerHTML = ''; // ボードをクリア (念のため)
+            // 既存のスクロールタイマーをすべてクリア
+            Object.values(scrollIntervals).forEach(clearTimeout);
+            scrollIntervals = {};
+            // 各列を生成してボードに追加
+            columnData.forEach((_, colIndex) => {
+                scheduleBoard.appendChild(createColumnElement(colIndex));
+                // 編集中でない場合のみ自動スクロールを開始
+                const columnEl = scheduleBoard.querySelector(`.schedule-column[data-column-index="${colIndex}"]`);
+                 if (!columnEl || !columnEl.classList.contains('editing')) {
+                    setupScrolling(colIndex); // 各列のスクロール設定
+                 }
+            });
+        }
+
+        // --- 単一列の要素を生成する関数 ---
+        function createColumnElement(colIndex) {
+            const col = columnData[colIndex];
+            const columnEl = document.createElement('div');
+            columnEl.classList.add('schedule-column');
+            columnEl.dataset.columnIndex = colIndex; // 列インデックスを保持
+
+            // --- 列ヘッダー (タイトル) ---
+            const titleEl = document.createElement('h2');
+            titleEl.classList.add('text-3xl', 'font-bold', 'text-center', 'mb-0');
+            titleEl.textContent = col.title;
+            titleEl.dataset.type = 'title'; // 編集タイプを追加
+            columnEl.appendChild(titleEl); // 先にタイトルを追加
+
+            // --- 警告メッセージをタイトルの直下に追加 ---
+            if (col.showWarning) {
+                const warningEl = document.createElement('div');
+                warningEl.classList.add('warning-message', 'text-xl');
+                warningEl.dataset.type = 'warning'; // 編集時の識別用
+                warningEl.textContent = col.warningText;
+                columnEl.appendChild(warningEl); // タイトルの後に追加
+            }
+
+            // --- スクロール用コンテナ ---
+            const scrollContainer = document.createElement('div');
+            scrollContainer.classList.add('items-scroll-container');
+            scrollContainer.id = `scroll-container-${colIndex}`;
+
+            // --- スクロール対象のリスト ---
+            const scrollableList = document.createElement('div');
+            scrollableList.classList.add('scrollable-list');
+            scrollableList.id = `scrollable-list-${colIndex}`;
+
+            // 時間セクションを生成してリストに追加
+            col.sections.forEach((section, sectionIndex) => {
+                scrollableList.appendChild(createSectionElement(colIndex, sectionIndex));
+            });
+
+            scrollContainer.appendChild(scrollableList);
+            columnEl.appendChild(scrollContainer); // 警告の後、編集コントロールの前に追加
+
+            // --- 編集コントロール (編集モード時に表示) ---
+            const editControls = document.createElement('div');
+            editControls.classList.add('edit-controls');
+
+            // 警告表示トグル
+            const warningToggleLabel = document.createElement('label');
+            warningToggleLabel.classList.add('warning-toggle', 'text-base');
+            const warningCheckbox = document.createElement('input');
+            warningCheckbox.type = 'checkbox';
+            warningCheckbox.checked = col.showWarning;
+            warningCheckbox.addEventListener('change', (e) => {
+                toggleWarning(colIndex, e.target.checked);
+            });
+            warningToggleLabel.appendChild(warningCheckbox);
+            warningToggleLabel.appendChild(document.createTextNode(' 警告メッセージを表示'));
+            editControls.appendChild(warningToggleLabel);
+
+            // セクション追加ボタン
+            const addSectionButton = document.createElement('button');
+            addSectionButton.textContent = '+ 時間セクションを追加';
+            addSectionButton.classList.add('add-section-button');
+            addSectionButton.onclick = () => addTimeSection(colIndex);
+            editControls.appendChild(addSectionButton);
+            columnEl.appendChild(editControls); // スクロールコンテナの後に追加
+
+            // --- 編集ボタン (右下のフローティングボタン) ---
+            const editButton = document.createElement('div');
+            editButton.classList.add('edit-button');
+            editButton.title = '編集モード切替';
+            // SVGアイコン (編集/保存)
+            editButton.innerHTML = `
+                <svg class="edit-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
+                <svg class="save-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+            `;
+            editButton.onclick = () => toggleEditMode(colIndex);
+            columnEl.appendChild(editButton);
+
+            return columnEl;
+        }
+
+        // --- 時間セクション要素を生成する関数 ---
+        function createSectionElement(colIndex, sectionIndex) {
+            const section = columnData[colIndex].sections[sectionIndex];
+            const sectionEl = document.createElement('div');
+            sectionEl.classList.add('time-section');
+            sectionEl.dataset.sectionIndex = sectionIndex; // セクションインデックスを保持
+
+            // 時間ヘッダー
+            const timeHeaderEl = document.createElement('div');
+            timeHeaderEl.classList.add('time-header');
+
+            // 時間テキスト
+            const timeTextEl = document.createElement('span');
+            timeTextEl.classList.add('time-text', 'text-xl');
+            timeTextEl.dataset.type = 'time'; // 編集時の識別用
+            timeTextEl.textContent = section.time;
+            timeHeaderEl.appendChild(timeTextEl);
+
+            // セクション削除ボタン (編集モード時に表示)
+            const deleteSectionBtn = document.createElement('button');
+            deleteSectionBtn.textContent = '×';
+            deleteSectionBtn.title = 'この時間セクションを削除';
+            deleteSectionBtn.classList.add('delete-section-button', 'hidden', 'text-base');
+            deleteSectionBtn.onclick = (event) => {
+                event.stopPropagation(); // 親要素へのイベント伝播を停止
+                deleteTimeSection(colIndex, sectionIndex);
+            };
+            timeHeaderEl.appendChild(deleteSectionBtn);
+            sectionEl.appendChild(timeHeaderEl);
+
+            // 区切り線
+            const divider = document.createElement('hr');
+            divider.classList.add('mb-3'); // マージン調整
+            sectionEl.appendChild(divider);
+
+            // スケジュール項目リスト
+            const itemsListEl = document.createElement('div');
+            itemsListEl.classList.add('schedule-items-list');
+
+            // 各項目を生成してリストに追加
+            section.items.forEach((item, itemIndex) => {
+                itemsListEl.appendChild(createItemElement(colIndex, sectionIndex, itemIndex, item));
+            });
+            sectionEl.appendChild(itemsListEl);
+
+            // 項目追加ボタン (編集モード時に表示)
+            const addItemBtn = document.createElement('button');
+            addItemBtn.textContent = '+ 項目追加';
+            addItemBtn.classList.add('add-button', 'hidden', 'mt-3', 'text-base'); // マージン調整
+            addItemBtn.onclick = (event) => {
+                event.stopPropagation(); // 親要素へのイベント伝播を停止
+                addItem(colIndex, sectionIndex);
+            };
+            sectionEl.appendChild(addItemBtn); // itemsListEl の外に戻す
+
+            return sectionEl;
+        }
+
+        // --- スケジュール項目要素を生成する関数 ---
+        function createItemElement(colIndex, sectionIndex, itemIndex, itemText) {
+            const itemEl = document.createElement('div');
+            itemEl.classList.add('schedule-item');
+            itemEl.dataset.itemIndex = itemIndex; // 項目インデックスを保持
+
+            // 項目テキスト
+            const textSpan = document.createElement('span');
+            textSpan.classList.add('text-lg');
+            textSpan.dataset.type = 'item'; // 編集時の識別用
+            textSpan.textContent = itemText;
+            itemEl.appendChild(textSpan);
+
+            // 項目削除ボタン (編集モード時に表示)
+            const deleteButton = document.createElement('button');
+            deleteButton.textContent = '削除';
+            deleteButton.classList.add('delete-button', 'hidden', 'text-base');
+            deleteButton.onclick = (event) => {
+                event.stopPropagation(); // 親要素へのイベント伝播を停止
+                deleteItem(colIndex, sectionIndex, itemIndex); // 確認なしで削除を実行
+            };
+            itemEl.appendChild(deleteButton);
+
+            return itemEl;
+        }
+
+        // --- 単一列を再レンダリングする関数 ---
+        function renderColumn(colIndex) {
+            const oldColumnEl = scheduleBoard.querySelector(`.schedule-column[data-column-index="${colIndex}"]`);
+            if (!oldColumnEl) {
+                console.error(`Column element with index ${colIndex} not found for re-rendering.`);
+                return;
+            }
+            const wasEditing = oldColumnEl.classList.contains('editing'); // 編集状態を記録
+            const scrollContainer = oldColumnEl.querySelector('.items-scroll-container');
+            const oldScrollTop = scrollContainer ? scrollContainer.scrollTop : 0; // 編集時のスクロール位置を記録
+
+            // 既存のスクロールを停止
+            stopScrolling(colIndex);
+            // 新しい列要素を作成
+            const newColumnEl = createColumnElement(colIndex);
+            // 古い要素と置き換え
+            scheduleBoard.replaceChild(newColumnEl, oldColumnEl);
+
+            // 編集中だった場合はスクロール位置を復元し、自動スクロールは開始しない
+            if (wasEditing) {
+                 // 強制的に編集モードにする
+                toggleEditMode(colIndex, true);
+                // スクロール位置を復元
+                const newScrollContainer = newColumnEl.querySelector('.items-scroll-container');
+                if (newScrollContainer) {
+                     // 少し待ってからスクロール位置を設定しないと反映されない場合がある
+                     requestAnimationFrame(() => {
+                         newScrollContainer.scrollTop = oldScrollTop;
+                     });
+                }
+            } else {
+                // 通常モードの場合は自動スクロールを開始
+                setupScrolling(colIndex);
+            }
+        }
+
+        // --- Enterキーで編集を終了 (blurを発火させる) ---
+        function handleEnterKey(e) {
+            // タイトル(h2)でもEnterキーで編集終了するように
+            if (e.key === 'Enter' && e.target.contentEditable === 'true') {
+                e.preventDefault(); // デフォルトの動作 (改行など) をキャンセル
+                e.target.blur();    // blurイベントを発火させて保存処理をトリガー
+            }
+        }
+
+        // --- 編集モード切替 ---
+        // forceState: true で強制的に編集モード、false で強制的に通常モード、null でトグル
+        function toggleEditMode(colIndex, forceState = null) {
+            const columnEl = scheduleBoard.querySelector(`.schedule-column[data-column-index="${colIndex}"]`);
+            if (!columnEl) return;
+            const editButton = columnEl.querySelector('.edit-button');
+            const scrollableList = columnEl.querySelector('.scrollable-list');
+            let isEditing;
+
+            // 編集状態を決定 (強制指定 or トグル)
+            if (forceState !== null) {
+                isEditing = forceState;
+                columnEl.classList.toggle('editing', isEditing);
+            } else {
+                isEditing = columnEl.classList.toggle('editing');
+            }
+            editButton.classList.toggle('editing', isEditing); // ボタンの表示も更新
+
+            // タイトル(h2)も編集対象に含める
+            const editableElements = columnEl.querySelectorAll('[data-type="title"], [data-type="time"], [data-type="item"], [data-type="warning"]');
+            editableElements.forEach(el => {
+                el.contentEditable = isEditing; // contentEditable属性を設定
+                // イベントリスナーを付け外し (重複登録を防ぐため)
+                el.removeEventListener('blur', handleBlurSave);
+                el.removeEventListener('keydown', handleEnterKey);
+                if (isEditing) {
+                    el.addEventListener('blur', handleBlurSave); // フォーカスが外れたら保存
+                    el.addEventListener('keydown', handleEnterKey); // Enterキーでblurを発火
+                }
+            });
+
+            // 編集用ボタン類 (削除、追加) の表示/非表示を切替
+            const deleteButtons = columnEl.querySelectorAll('.delete-button, .delete-section-button');
+            deleteButtons.forEach(btn => btn.classList.toggle('hidden', !isEditing));
+
+            const addButtons = columnEl.querySelectorAll('.add-button'); // 項目追加ボタン
+            addButtons.forEach(btn => btn.classList.toggle('hidden', !isEditing));
+
+            // スクロール制御
+            if (isEditing) {
+                stopScrolling(colIndex); // 編集中は自動スクロール停止
+                if (scrollableList) scrollableList.style.top = '0px'; // 編集開始時にリスト位置をリセット
+            } else {
+                 // 通常モードに戻るとき
+                 if (forceState === null) {
+                     // 通常のトグル操作で編集モードを終了した場合のみ再描画
+                     renderColumn(colIndex); // 保存処理後に列を再描画して表示を確定＆自動スクロール開始
+                 } else {
+                     // 強制的に通常モードにした場合（例: renderColumn内部からの呼び出し）
+                     // renderColumn内で setupScrolling が呼ばれるのでここでは何もしない
+                 }
+            }
+        }
+
+        // --- blurイベントハンドラ (編集内容の保存) ---
+        function handleBlurSave(event) {
+            const el = event.target;
+            // 要素がDOMにまだ存在するか確認 (削除された要素のblurイベントを無視)
+            if (!document.body.contains(el)) {
+                return;
+            }
+            // 関連するインデックスを取得
+            const columnEl = el.closest('.schedule-column');
+            const colIndex = columnEl ? parseInt(columnEl.dataset.columnIndex) : null;
+            // title の場合は sectionIndex, itemIndex は null になる
+            const sectionEl = el.closest('.time-section');
+            const sectionIndex = sectionEl ? parseInt(sectionEl.dataset.sectionIndex) : null;
+            const itemEl = el.closest('.schedule-item');
+            const itemIndex = itemEl ? parseInt(itemEl.dataset.itemIndex) : null;
+            const type = el.dataset.type; // 要素の種類 (title, time, item, warning)
+
+            // インデックスが有効なら変更を保存
+            if (colIndex !== null && !isNaN(colIndex)) {
+                // title の場合 sectionIndex, itemIndex は null だが問題ない
+                saveChanges(colIndex, sectionIndex, itemIndex, type, el.textContent);
+            }
+        }
+
+        // --- 変更保存 ---
+        function saveChanges(colIndex, sectionIndex, itemIndex, type, newText) {
+            const cleanText = newText.trim(); // 前後の空白を除去
+            try {
+                // インデックスの有効性チェックを追加
+                if (isNaN(colIndex) || !columnData[colIndex]) return;
+
+                switch (type) {
+                    // title の保存処理を追加
+                    case 'title':
+                         columnData[colIndex].title = cleanText;
+                        break;
+                    case 'time':
+                        if (!isNaN(sectionIndex) && columnData[colIndex].sections[sectionIndex]) {
+                             columnData[colIndex].sections[sectionIndex].time = cleanText;
+                        }
+                        break;
+                    case 'item':
+                        if (!isNaN(sectionIndex) && !isNaN(itemIndex) && columnData[colIndex].sections[sectionIndex]?.items[itemIndex] !== undefined) {
+                            columnData[colIndex].sections[sectionIndex].items[itemIndex] = cleanText;
+                        }
+                        break;
+                    case 'warning':
+                         columnData[colIndex].warningText = cleanText;
+                        break;
+                }
+            } catch (error) {
+                console.error("Error saving data:", error, {colIndex, sectionIndex, itemIndex, type, newText});
+            }
+        }
+
+        // --- 時間セクション追加 ---
+        function addTimeSection(colIndex) {
+            // prompt() を削除し、デフォルト値を "void" に設定
+            if (!isNaN(colIndex) && columnData[colIndex]) {
+                // 削除: isHiddenInSection の追加を削除
+                columnData[colIndex].sections.push({ time: "void", items: [] });
+                renderColumn(colIndex); // 対象列のみ再描画
+            }
+        }
+
+        // --- 時間セクション削除 ---
+        function deleteTimeSection(colIndex, sectionIndex) {
+            // confirm() を削除 (前の修正)
+            if (isNaN(colIndex) || isNaN(sectionIndex) || !columnData[colIndex]?.sections[sectionIndex]) return;
+            // 確認せずに削除を実行
+            columnData[colIndex].sections.splice(sectionIndex, 1);
+            renderColumn(colIndex); // 対象列のみ再描画
+        }
+
+        // --- 項目追加 ---
+        function addItem(colIndex, sectionIndex) {
+            // prompt() を削除し、デフォルト値を "void" に設定
+             if (isNaN(colIndex) || isNaN(sectionIndex) || !columnData[colIndex]?.sections[sectionIndex]) return;
+            columnData[colIndex].sections[sectionIndex].items.push("void"); // 項目 "void" を追加
+            // 削除: isCollapsed 関連の処理を削除
+            renderColumn(colIndex); // 対象列のみ再描画
+        }
+
+        // --- 項目削除 ---
+        function deleteItem(colIndex, sectionIndex, itemIndex) {
+            // confirm() を削除 (前の修正)
+            if (isNaN(colIndex) || isNaN(sectionIndex) || isNaN(itemIndex) || !columnData[colIndex]?.sections[sectionIndex]?.items[itemIndex]) return;
+            // 確認せずに削除を実行
+            // 1. データから削除
+            columnData[colIndex].sections[sectionIndex].items.splice(itemIndex, 1);
+            // 2. 列を再レンダリングして変更を反映
+            renderColumn(colIndex);
+        }
+
+        // --- 警告表示切替 ---
+        function toggleWarning(colIndex, show) {
+            if (isNaN(colIndex) || !columnData[colIndex]) return;
+            columnData[colIndex].showWarning = show;
+            renderColumn(colIndex); // 対象列のみ再描画
+        }
+
+        // --- 自動スクロール関連 ---
+        function setupScrolling(colIndex) {
+            stopScrolling(colIndex); // 既存のタイマーがあれば停止
+            const scrollContainer = document.getElementById(`scroll-container-${colIndex}`);
+            const scrollableList = document.getElementById(`scrollable-list-${colIndex}`);
+            if (!scrollContainer || !scrollableList) return;
+
+             // 編集中なら何もしない
+             const columnEl = scheduleBoard.querySelector(`.schedule-column[data-column-index="${colIndex}"]`);
+             if (columnEl && columnEl.classList.contains('editing')) {
+                 return;
+             }
+
+            // コンテナとリストの高さを取得 (少し待ってから取得する方が確実な場合がある)
+            requestAnimationFrame(() => {
+                 // 再度チェック（requestAnimationFrame のコールバック実行までに状態が変わる可能性があるため）
+                 if (!document.getElementById(`scroll-container-${colIndex}`)) return;
+                 const currentColumnEl = scheduleBoard.querySelector(`.schedule-column[data-column-index="${colIndex}"]`);
+                 if (!currentColumnEl || currentColumnEl.classList.contains('editing')) {
+                     return;
+                 }
+
+                 const listHeight = scrollableList.scrollHeight;
+                 const containerHeight = scrollContainer.clientHeight;
+
+                // リストがコンテナより大きい場合のみスクロールを設定
+                if (listHeight > containerHeight) {
+                    let currentScrollTop = 0;
+                    const scrollAmount = containerHeight; // 1画面分スクロール
+                    const scrollDelay = 3000; // 次のスクロールまでの時間(ms)
+                    const pauseAtTopDelay = 1500; // 一番上に戻った後の待ち時間(ms)
+
+                    function scrollStep() {
+                        // 要素が存在するかを再確認
+                        const stepColumnEl = scheduleBoard.querySelector(`.schedule-column[data-column-index="${colIndex}"]`);
+                        if (!stepColumnEl) { // 要素がなければ停止
+                            stopScrolling(colIndex);
+                            return;
+                        }
+
+                        // スクロール位置を更新
+                        currentScrollTop += scrollAmount;
+
+                        const currentListHeight = scrollableList.scrollHeight;
+                        if (currentScrollTop >= currentListHeight && currentListHeight > 0) {
+                            currentScrollTop = 0;
+                            scrollableList.style.transition = 'none'; // 一瞬でトップに戻すためトランジションを解除
+                            scrollableList.style.top = `-${currentScrollTop}px`;
+
+                            // 少し待ってからトランジションを戻し、次のスクロールを予約
+                            setTimeout(() => {
+                                if (!document.getElementById(`scrollable-list-${colIndex}`)) return; // 要素が消えていたら何もしない
+                                const checkList = document.getElementById(`scrollable-list-${colIndex}`);
+                                const checkCol = checkList ? checkList.closest('.schedule-column') : null;
+                                // 再度チェック: 待機中に編集モードになっていないか
+                                if (checkCol && !checkCol.classList.contains('editing')) {
+                                    checkList.style.transition = 'top 0.5s ease-in-out';
+                                    scrollIntervals[colIndex] = setTimeout(scrollStep, pauseAtTopDelay);
+                                } else {
+                                    stopScrolling(colIndex);
+                                }
+                            }, 50); // 50ms待つ (ブラウザのレンダリングに配慮)
+                            return;
+                        } else if (currentListHeight <= 0) {
+                             currentScrollTop = 0;
+                             scrollableList.style.top = '0px';
+                             scrollIntervals[colIndex] = setTimeout(scrollStep, scrollDelay); // とりあえず待機
+                             return;
+                        }
+
+
+                        // 通常のスクロール
+                        const maxScroll = currentListHeight - containerHeight; // 最大スクロール量
+                        const targetScroll = Math.min(currentScrollTop, maxScroll > 0 ? maxScroll : 0); // 行き過ぎないように調整
+                        scrollableList.style.top = `-${targetScroll}px`;
+
+                        // 次のスクロールを予約
+                        scrollIntervals[colIndex] = setTimeout(scrollStep, scrollDelay);
+                    }
+                    // 初回のスクロールを開始
+                    scrollIntervals[colIndex] = setTimeout(scrollStep, scrollDelay);
+                } else {
+                    // スクロール不要な場合は top を 0 に
+                    scrollableList.style.top = '0px';
+                }
+            });
+        }
+
+        // --- スクロール停止 ---
+        function stopScrolling(colIndex) {
+            if (scrollIntervals[colIndex]) {
+                clearTimeout(scrollIntervals[colIndex]);
+                delete scrollIntervals[colIndex]; // 管理オブジェクトから削除
+            }
+        }
+
+        // 初期データを読み込んで表示
+        document.addEventListener('DOMContentLoaded', () => {
+             renderAllColumns(); // 初期データを表示
+        });
+
+
+        // --- ウィンドウリサイズ時の再計算 ---
+        // リサイズが頻繁に発生するため、debounce処理を入れるとより良い
+        let resizeTimer;
+        window.addEventListener('resize', () => {
+            clearTimeout(resizeTimer);
+            resizeTimer = setTimeout(() => {
+                console.log("Resizing, recalculating scroll...");
+                columnData.forEach((_, colIndex) => {
+                    // 編集中でなければスクロールを再設定
+                    const columnEl = scheduleBoard.querySelector(`.schedule-column[data-column-index="${colIndex}"]`);
+                    if (columnEl && !columnEl.classList.contains('editing')) {
+                         setupScrolling(colIndex);
+                    }
+                });
+            }, 250); // 250ms待ってから実行
+        });
+
+    </script>
+
+</body>
+</html>
